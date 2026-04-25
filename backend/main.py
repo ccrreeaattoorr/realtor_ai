@@ -36,9 +36,22 @@ pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 
 app = FastAPI(title="Realtor Hebrew API")
 
+# Setup CORS
+origins = [
+    "http://localhost:5173",
+    "http://127.0.0.1:5173",
+]
+if FRONTEND_URL and FRONTEND_URL != "*":
+    origins.append(FRONTEND_URL)
+    # Also add version without trailing slash just in case
+    if FRONTEND_URL.endswith("/"):
+        origins.append(FRONTEND_URL[:-1])
+else:
+    origins = ["*"]
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[FRONTEND_URL],
+    allow_origins=origins,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
