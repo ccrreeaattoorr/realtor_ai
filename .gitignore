@@ -1,0 +1,22 @@
+# Root .gitignore
+
+# Python
+backend/venv/
+backend/__pycache__/
+backend/*.db
+backend/.env
+backend/.env.example
+
+# Node
+frontend/node_modules/
+frontend/dist/
+frontend/.env
+frontend/.env.local
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Gemini / Temp
+.gemini/
+data.txt
