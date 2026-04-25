@@ -1,4 +1,5 @@
 export interface Listing {
+  id?: string;
   city: string;
   street: string;
   rooms: number;
@@ -7,7 +8,9 @@ export interface Listing {
   total_floors: number;
   has_elevator: boolean;
   has_parking: boolean;
+  has_mamad?: boolean;
   raw_text: string;
+  created_at?: string;
 }
 
 export interface User {

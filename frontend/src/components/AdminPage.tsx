@@ -23,7 +23,6 @@ const AdminPage: React.FC = () => {
   // Listings Filters & Pagination
   const [city, setCity] = useState('');
   const [minRooms, setMinRooms] = useState<number | undefined>();
-  const [maxPrice, setMaxPrice] = useState<number | undefined>();
   const [page, setPage] = useState(1);
   const [total, setTotal] = useState(0);
 
@@ -35,7 +34,7 @@ const AdminPage: React.FC = () => {
     try {
       const s = await fetchAdminStats();
       setStats(s);
-      const res = await fetchListings(city, minRooms, maxPrice, p);
+      const res = await fetchListings(city, minRooms, undefined, p);
       setListings(res.listings || []);
       setTotal(res.total || 0);
       setPage(res.page || 1);
