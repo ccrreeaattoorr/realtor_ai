@@ -45,6 +45,10 @@ const Captcha = forwardRef<CaptchaHandle, CaptchaProps>(({ onVerify }, ref) => {
   }, [timeLeft]);
 
   useEffect(() => {
+    if (!code || !input) {
+      onVerify(false);
+      return;
+    }
     onVerify(input.toUpperCase() === code);
   }, [input, code]);
 

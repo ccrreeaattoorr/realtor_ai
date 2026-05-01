@@ -7,6 +7,7 @@ from typing import List, Optional
 from datetime import datetime, timedelta
 from fastapi import FastAPI, HTTPException, Depends, UploadFile, File, Form
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.security import OAuth2PasswordBearer
 from elasticsearch import Elasticsearch
 from openai import OpenAI
 import requests
@@ -69,16 +70,16 @@ class User(BaseModel):
 
 class Listing(BaseModel):
     id: Optional[str] = None
-    city: str
-    street: str
-    rooms: float
-    price: int
-    floor: int
-    total_floors: int
-    has_elevator: bool
-    has_parking: bool
+    city: Optional[str] = None
+    street: Optional[str] = None
+    rooms: Optional[float] = None
+    price: Optional[int] = None
+    floor: Optional[int] = None
+    total_floors: Optional[int] = None
+    has_elevator: Optional[bool] = None
+    has_parking: Optional[bool] = None
     has_mamad: Optional[bool] = False
-    raw_text: str
+    raw_text: Optional[str] = None
     created_at: Optional[str] = None
 
 class Token(BaseModel):
@@ -106,19 +107,53 @@ def create_access_token(data: dict):
     to_encode.update({"exp": expire})
     return jwt.encode(to_encode, SECRET_KEY, algorithm=ALGORITHM)
 
+oauth2_scheme = OAuth2PasswordBearer(tokenUrl="api/auth/login", auto_error=False)
+
+def get_current_user(token: Optional[str] = Depends(oauth2_scheme)):
+    if not token:
+        raise HTTPException(status_code=401, detail="Not authenticated")
+    try:
+        payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
+    except JWTError:
+        raise HTTPException(status_code=401, detail="Invalid token")
+    if not payload.get("sub"):
+        raise HTTPException(status_code=401, detail="Invalid token payload")
+    return payload
+
+def require_admin(user: dict = Depends(get_current_user)):
+    if user.get("role") != "admin":
+        raise HTTPException(status_code=403, detail="Admin privileges required")
+    return user
+
+def _green_api_send_url() -> Optional[str]:
+    if not GREEN_API_INSTANCE or not GREEN_API_TOKEN:
+        return None
+    base = GREEN_API_URL.rstrip("/")
+    return f"{base}/waInstance{GREEN_API_INSTANCE}/sendMessage/{GREEN_API_TOKEN}"
+
 def send_whatsapp_otp(phone: str, otp: str):
+    url = _green_api_send_url()
+    if not url:
+        print("WARNING: GREEN_API_INSTANCE/GREEN_API_TOKEN not set; skipping WhatsApp send")
+        return False
     clean_phone = normalize_phone(phone)
-    url = f"https://7107.api.greenapi.com/waInstance{GREEN_API_ID}/sendMessage/{GREEN_API_TOKEN}"
     payload = {
         "chatId": f"{clean_phone}@c.us",
         "message": f"קוד האימות שלך לריאלטור הוא: {otp}"
     }
-    response = requests.post(url, json=payload)
-    return response.status_code == 200
+    try:
+        response = requests.post(url, json=payload, timeout=10)
+        return response.status_code == 200
+    except requests.RequestException as e:
+        print(f"WhatsApp send failed: {e}")
+        return False
 
 # Initialization
 @app.on_event("startup")
 def startup_db():
+    if es is None:
+        print("WARNING: Elasticsearch client not configured; skipping startup init")
+        return
     if not es.indices.exists(index="users"):
         es.indices.create(index="users")
     if not es.indices.exists(index="listings"):
@@ -270,24 +305,24 @@ def get_listings(
     }
 
 @app.put("/api/listings/{listing_id}")
-def update_listing(listing_id: str, listing: Listing):
+def update_listing(listing_id: str, listing: Listing, _: dict = Depends(require_admin)):
     doc = listing.dict(exclude={"id"})
     es.index(index="listings", id=listing_id, document=doc, refresh=True)
     return {"message": "Listing updated"}
 
 @app.delete("/api/listings/{listing_id}")
-def delete_listing(listing_id: str):
+def delete_listing(listing_id: str, _: dict = Depends(require_admin)):
     es.delete(index="listings", id=listing_id, refresh=True)
     return {"message": "Listing deleted"}
 
 # Admin Stats & Bulk Actions
 @app.get("/api/admin/stats")
-def get_stats():
+def get_stats(_: dict = Depends(require_admin)):
     res = es.count(index="listings")
     return {"total_listings": res['count']}
 
 @app.delete("/api/admin/listings/bulk")
-def bulk_delete_listings(start_date: str, end_date: str):
+def bulk_delete_listings(start_date: str, end_date: str, _: dict = Depends(require_admin)):
     query = {
         "range": {
             "created_at": {
@@ -303,11 +338,11 @@ def bulk_delete_listings(start_date: str, end_date: str):
 upload_progress = {"status": "idle", "percent": 0, "message": ""}
 
 @app.get("/api/admin/upload-status")
-def get_upload_status():
+def get_upload_status(_: dict = Depends(require_admin)):
     return upload_progress
 
 @app.post("/api/admin/upload-listings")
-async def upload_listings(file: UploadFile = File(...)):
+async def upload_listings(file: UploadFile = File(...), _: dict = Depends(require_admin)):
     global upload_progress
     content = await file.read()
     text = content.decode("utf-8")
@@ -319,7 +354,11 @@ async def upload_listings(file: UploadFile = File(...)):
     total_messages = len(messages)
     chunk_size = 100
     all_parsed_listings = []
-    
+
+    if total_messages == 0:
+        upload_progress = {"status": "idle", "percent": 100, "message": "No messages found in file."}
+        return {"message": "No messages found in file.", "indexed": 0}
+
     upload_progress = {"status": "processing", "percent": 0, "message": f"Starting upload of {total_messages} messages..."}
     last_notified_percent = 0
     now = datetime.utcnow().isoformat()
@@ -338,10 +377,11 @@ async def upload_listings(file: UploadFile = File(...)):
             if current_percent >= last_notified_percent + 5:
                 last_notified_percent = current_percent
                 notification_msg = f"התקדמות העלאת מודעות: {current_percent}% ({i}/{total_messages})"
-                try:
-                    url = f"https://7107.api.greenapi.com/waInstance{GREEN_API_ID}/sendMessage/{GREEN_API_TOKEN}"
-                    requests.post(url, json={"chatId": f"{admin_phone}@c.us", "message": notification_msg})
-                except: pass
+                url = _green_api_send_url()
+                if url:
+                    try:
+                        requests.post(url, json={"chatId": f"{admin_phone}@c.us", "message": notification_msg}, timeout=10)
+                    except requests.RequestException: pass
 
             prompt = """
             Extract real estate data from these Hebrew WhatsApp messages. 
@@ -398,20 +438,22 @@ async def upload_listings(file: UploadFile = File(...)):
         upload_progress = {"status": "idle", "percent": 100, "message": "Upload complete!"}
         
         # Success Notification
-        try:
-            url = f"https://7107.api.greenapi.com/waInstance{GREEN_API_ID}/sendMessage/{GREEN_API_TOKEN}"
-            msg = f"✅ העלאת הקובץ הושלמה ב-100%! נוספו/עודכנו {len(all_parsed_listings)} מודעות מתוך {total_messages} הודעות."
-            requests.post(url, json={"chatId": f"{admin_phone}@c.us", "message": msg})
-        except: pass
+        url = _green_api_send_url()
+        if url:
+            try:
+                msg = f"✅ העלאת הקובץ הושלמה ב-100%! נוספו/עודכנו {len(all_parsed_listings)} מודעות מתוך {total_messages} הודעות."
+                requests.post(url, json={"chatId": f"{admin_phone}@c.us", "message": msg}, timeout=10)
+            except requests.RequestException: pass
 
     except Exception as fatal_e:
         upload_progress = {"status": "error", "percent": 0, "message": f"Fatal error: {str(fatal_e)}"}
         # Failure Notification
-        try:
-            url = f"https://7107.api.greenapi.com/waInstance{GREEN_API_ID}/sendMessage/{GREEN_API_TOKEN}"
-            msg = f"❌ שגיאה קריטית בהעלאת הקובץ: {str(fatal_e)}"
-            requests.post(url, json={"chatId": f"{admin_phone}@c.us", "message": msg})
-        except: pass
+        url = _green_api_send_url()
+        if url:
+            try:
+                msg = f"❌ שגיאה קריטית בהעלאת הקובץ: {str(fatal_e)}"
+                requests.post(url, json={"chatId": f"{admin_phone}@c.us", "message": msg}, timeout=10)
+            except requests.RequestException: pass
         raise fatal_e
 
     return {"message": f"Successfully parsed and indexed {len(all_parsed_listings)} listings."}

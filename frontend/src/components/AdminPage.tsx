@@ -57,17 +57,15 @@ const AdminPage: React.FC = () => {
           if (res.status === 'processing') {
             setPercent(res.percent);
             setStatus(res.message);
-          } else if (res.status === 'idle' && percent > 0) {
-            setPercent(100);
-            setStatus('העלאה הושלמה!');
+          } else if (res.status === 'error') {
+            setStatus(res.message || 'שגיאה בהעלאה');
             setLoading(false);
-            loadData(1);
           }
         } catch (e) {}
       }, 2000);
     }
     return () => clearInterval(interval);
-  }, [loading, percent]);
+  }, [loading]);
 
   const handleUpload = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -76,9 +74,13 @@ const AdminPage: React.FC = () => {
     setPercent(0);
     setStatus('מתחיל העלאה...');
     try {
-      await uploadListingsFile(file);
+      const res = await uploadListingsFile(file);
+      setPercent(100);
+      setStatus(res?.message || 'העלאה הושלמה!');
+      loadData(1);
     } catch (err) {
       setStatus('שגיאה בהעלאת הקובץ');
+    } finally {
       setLoading(false);
     }
   };
