@@ -8,7 +8,7 @@ from datetime import datetime, timedelta
 from fastapi import FastAPI, HTTPException, Depends, UploadFile, File, Form
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.security import OAuth2PasswordBearer
-from elasticsearch import Elasticsearch
+from elasticsearch import Elasticsearch, NotFoundError
 from openai import OpenAI
 import requests
 from passlib.context import CryptContext
@@ -161,7 +161,7 @@ def startup_db():
     
     # Seed Admin
     admin_phone = normalize_phone("0546546855")
-    if not es.exists(index="users", id=admin_phone, ignore=404):
+    if not es.exists(index="users", id=admin_phone):
         admin_user = {
             "phone": admin_phone,
             "password": get_password_hash("90lomik1"),
@@ -175,9 +175,12 @@ def startup_db():
 @app.post("/api/auth/register")
 def register(user: User):
     user.phone = normalize_phone(user.phone)
-    res = es.get(index="users", id=user.phone, ignore=404)
-    if res.get('found') and res['_source'].get('is_verified'):
-        raise HTTPException(status_code=400, detail="User already registered and verified")
+    try:
+        existing = es.get(index="users", id=user.phone)
+        if existing['_source'].get('is_verified'):
+            raise HTTPException(status_code=400, detail="User already registered and verified")
+    except NotFoundError:
+        pass
 
     otp = str(random.randint(1000, 9999))
     expires = datetime.utcnow() + timedelta(minutes=5)
@@ -197,10 +200,11 @@ def register(user: User):
 @app.post("/api/auth/verify")
 def verify_otp(phone: str = Form(...), otp: str = Form(...)):
     normalized = normalize_phone(phone)
-    res = es.get(index="users", id=normalized, ignore=404)
-    if not res.get('found'):
+    try:
+        res = es.get(index="users", id=normalized)
+    except NotFoundError:
         raise HTTPException(status_code=404, detail="User not found")
-    
+
     user_data = res['_source']
     if user_data.get('is_verified'):
         return {"message": "User already verified"}
