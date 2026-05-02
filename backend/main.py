@@ -12,7 +12,7 @@ from fastapi.security import OAuth2PasswordBearer
 from elasticsearch import Elasticsearch, NotFoundError
 from openai import OpenAI
 import requests
-from passlib.context import CryptContext
+import bcrypt
 from jose import JWTError, jwt
 from pydantic import BaseModel
 
@@ -34,7 +34,6 @@ if not ES_API_URL or not ES_API_KEY:
     print("WARNING: ES_API_URL or ES_API_KEY not set")
 es = Elasticsearch(ES_API_URL, api_key=ES_API_KEY) if ES_API_URL else None
 openai_client = OpenAI(api_key=OPENAI_API_KEY)
-pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 
 app = FastAPI(title="Realtor Hebrew API")
 
@@ -96,11 +95,14 @@ def normalize_phone(phone: str) -> str:
         clean = "972" + clean
     return clean
 
-def get_password_hash(password):
-    return pwd_context.hash(password)
+def get_password_hash(password: str) -> str:
+    return bcrypt.hashpw(password.encode("utf-8"), bcrypt.gensalt()).decode("utf-8")
 
-def verify_password(plain_password, hashed_password):
-    return pwd_context.verify(plain_password, hashed_password)
+def verify_password(plain_password: str, hashed_password: str) -> bool:
+    try:
+        return bcrypt.checkpw(plain_password.encode("utf-8"), hashed_password.encode("utf-8"))
+    except ValueError:
+        return False
 
 def create_access_token(data: dict):
     to_encode = data.copy()
