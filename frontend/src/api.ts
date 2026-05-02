@@ -45,15 +45,31 @@ export const login = async (formData: FormData): Promise<AuthResponse> => {
   return response.json();
 };
 
+const safeFetch = async (input: RequestInfo, init?: RequestInit): Promise<Response> => {
+  try {
+    return await fetch(input, init);
+  } catch (e: any) {
+    throw new Error('לא ניתן להתחבר לשרת. בדוק חיבור לאינטרנט ונסה שוב.');
+  }
+};
+
+const parseErrorDetail = async (response: Response, fallback: string): Promise<string> => {
+  try {
+    const error = await response.json();
+    return error.detail || fallback;
+  } catch {
+    return fallback;
+  }
+};
+
 export const register = async (userData: any): Promise<any> => {
-  const response = await fetch(`${API_BASE_URL}/auth/register`, {
+  const response = await safeFetch(`${API_BASE_URL}/auth/register`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(userData),
   });
   if (!response.ok) {
-    const error = await response.json();
-    throw new Error(error.detail || 'Registration failed');
+    throw new Error(await parseErrorDetail(response, 'Registration failed'));
   }
   return response.json();
 };
@@ -63,13 +79,12 @@ export const verifyOTP = async (phone: string, otp: string): Promise<any> => {
   formData.append('phone', phone);
   formData.append('otp', otp);
 
-  const response = await fetch(`${API_BASE_URL}/auth/verify`, {
+  const response = await safeFetch(`${API_BASE_URL}/auth/verify`, {
     method: 'POST',
     body: formData,
   });
   if (!response.ok) {
-    const error = await response.json();
-    throw new Error(error.detail || 'Verification failed');
+    throw new Error(await parseErrorDetail(response, 'Verification failed'));
   }
   return response.json();
 };
