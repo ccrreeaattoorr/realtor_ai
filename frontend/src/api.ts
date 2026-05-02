@@ -19,7 +19,7 @@ export const fetchListings = async (
   hasMamad?: boolean,
   freeText?: string
 ): Promise<any> => {
-  const url = new URL(`${API_BASE_URL}/listings`);
+  const url = new URL(`${API_BASE_URL}/listings`, window.location.origin);
   if (city) url.searchParams.append('city', city);
   if (minRooms) url.searchParams.append('min_rooms', minRooms.toString());
   if (maxPrice) url.searchParams.append('max_price', maxPrice.toString());
@@ -115,7 +115,7 @@ export const deleteListing = async (id: string): Promise<any> => {
 };
 
 export const bulkDeleteListings = async (startDate: string, endDate: string): Promise<any> => {
-  const url = new URL(`${API_BASE_URL}/admin/listings/bulk`);
+  const url = new URL(`${API_BASE_URL}/admin/listings/bulk`, window.location.origin);
   url.searchParams.append('start_date', startDate);
   url.searchParams.append('end_date', endDate);
 
