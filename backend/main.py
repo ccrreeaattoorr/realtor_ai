@@ -7,6 +7,7 @@ from typing import List, Optional
 from datetime import datetime, timedelta
 from fastapi import FastAPI, HTTPException, Depends, UploadFile, File, Form
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import FileResponse
 from fastapi.security import OAuth2PasswordBearer
 from elasticsearch import Elasticsearch, NotFoundError
 from openai import OpenAI
@@ -461,6 +462,19 @@ async def upload_listings(file: UploadFile = File(...), _: dict = Depends(requir
         raise fatal_e
 
     return {"message": f"Successfully parsed and indexed {len(all_parsed_listings)} listings."}
+
+# Serve built frontend (SPA) — keep this AFTER all /api/* routes
+FRONTEND_DIST = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "frontend", "dist"))
+
+if os.path.isdir(FRONTEND_DIST):
+    @app.get("/{full_path:path}")
+    def serve_spa(full_path: str):
+        if full_path.startswith("api"):
+            raise HTTPException(status_code=404, detail="Not Found")
+        candidate = os.path.normpath(os.path.join(FRONTEND_DIST, full_path))
+        if full_path and candidate.startswith(FRONTEND_DIST) and os.path.isfile(candidate):
+            return FileResponse(candidate)
+        return FileResponse(os.path.join(FRONTEND_DIST, "index.html"))
 
 if __name__ == "__main__":
     import uvicorn
